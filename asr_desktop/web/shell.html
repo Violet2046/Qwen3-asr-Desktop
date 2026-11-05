@@ -319,6 +319,18 @@
     return Object.keys(PAGES).find((key) => frame.dataset.page === key) || 'offline';
   }
 
+  let loadTimer = null;
+
+  function showLoadError(text) {
+    clearTimeout(loadTimer);
+    loading.innerHTML =
+      '<div style="text-align:center;line-height:2.2">' + text +
+      '<br><span id="retryLoad" style="color:#2dd4bf;cursor:pointer;font-weight:600">点击重试</span></div>';
+    loading.classList.remove('hide');
+    const retry = $('retryLoad');
+    if (retry) retry.addEventListener('click', () => navigate(currentKey()));
+  }
+
   function navigate(page, keepLoading) {
     if (!PAGES[page]) page = 'offline';
     frame.dataset.page = page;
@@ -326,13 +338,17 @@
       btn.classList.toggle('active', btn.dataset.page === page);
     });
     if (!keepLoading) {
-      loading.classList.remove('hide');
       loading.innerHTML = '<div class="spinner"></div><div>正在加载界面…</div>';
+      loading.classList.remove('hide');
+      clearTimeout(loadTimer);
+      // iframe 的 load 事件在异常情况下可能不触发，超时给出可点击的重试，避免一直转圈
+      loadTimer = setTimeout(() => showLoadError('页面加载超时'), 8000);
     }
     frame.src = PAGES[page];
   }
 
   frame.addEventListener('load', () => {
+    clearTimeout(loadTimer);
     // 页面内部可能跳到没有 embed 参数的地址，补上参数保持内嵌样式
     try {
       const loc = frame.contentWindow.location;
@@ -365,6 +381,8 @@
 
   // ---------- 服务状态 ----------
   let lastHealth = null;
+  let healthFails = 0;
+  let healthInFlight = false;
 
   function setDot(kind) {
     ['statusDot', 'titleDot'].forEach((id) => {
@@ -374,10 +392,16 @@
   }
 
   async function refreshHealth() {
+    if (healthInFlight) return;
+    healthInFlight = true;
     try {
-      const res = await fetch('/v2/health', { cache: 'no-store' });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch('/v2/health', { cache: 'no-store', signal: controller.signal });
+      clearTimeout(timer);
       const data = await res.json();
       lastHealth = data;
+      healthFails = 0;
       const ready = data.status === 'ready';
       setDot(ready ? 'ok' : (data.status === 'loading' ? 'warn' : 'err'));
       $('statusTitle').textContent = ready ? 'Ollama 已连接' : (data.status === 'loading' ? '模型加载中…' : '连接异常');
@@ -389,9 +413,17 @@
       $('kvVersion').textContent = data.ollama_version ? ('v' + data.ollama_version) : '—';
       $('kvPort').textContent = location.port || '—';
     } catch (err) {
+      healthFails += 1;
       setDot('err');
       $('statusTitle').textContent = '本地服务异常';
-      $('statusSub').textContent = String(err && err.message || err);
+      $('statusSub').textContent = healthFails >= 2
+        ? '识别服务未响应，请重试或重启程序'
+        : '正在重试…';
+      if (healthFails >= 2 && !loading.classList.contains('hide')) {
+        showLoadError('本地识别服务未响应');
+      }
+    } finally {
+      healthInFlight = false;
     }
   }
 
@@ -402,7 +434,7 @@
 
   navigate('offline', false);
   refreshHealth();
-  setInterval(refreshHealth, 5000);
+  setInterval(refreshHealth, 8000);
 })();
 </script>
 </body>

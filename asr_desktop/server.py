@@ -69,7 +69,7 @@ class AppContext:
     def health(self, force: bool = False) -> Dict[str, Any]:
         now = time.time()
         cached_at, cached = self._health_cache
-        if not force and cached is not None and now - cached_at < 3.0:
+        if not force and cached is not None and now - cached_at < 6.0:
             return cached
         payload = self._build_health()
         self._health_cache = (now, payload)
@@ -213,19 +213,22 @@ def create_app(ctx: AppContext) -> FastAPI:
     # ------------------------------------------------------------------ 兼容接口
     @app.get("/v2/health")
     async def health() -> Dict[str, Any]:
-        return ctx.health()
+        # 探测 Ollama / NPU 可能较慢，放到线程里避免阻塞事件循环
+        return await asyncio.to_thread(ctx.health)
 
     @app.get("/v1/health", include_in_schema=False)
     async def health_v1() -> Dict[str, Any]:
-        return ctx.health()
+        return await asyncio.to_thread(ctx.health)
 
     @app.get("/v2/capabilities")
     async def capabilities() -> Dict[str, Any]:
-        return ctx.health()["capabilities"]
+        payload = await asyncio.to_thread(ctx.health)
+        return payload["capabilities"]
 
     @app.get("/v1/capabilities", include_in_schema=False)
     async def capabilities_v1() -> Dict[str, Any]:
-        return ctx.health()["capabilities"]
+        payload = await asyncio.to_thread(ctx.health)
+        return payload["capabilities"]
 
     # ------------------------------------------------------------------ 离线转写
     @app.post("/v2/asr")
@@ -302,6 +305,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     async def get_settings() -> Dict[str, Any]:
         data = ctx.settings.as_dict()
         ffmpeg = audio.find_ffmpeg(str(data.get("ffmpeg_path") or ""))
+        npu_status = await asyncio.to_thread(ctx.npu.status)
         return {
             "settings": data,
             "languages": LANGUAGES,
@@ -310,7 +314,7 @@ def create_app(ctx: AppContext) -> FastAPI:
             "settings_path": str(ctx.settings.path),
             "data_dir": str(ctx.settings.data_path),
             "running_port": ctx.running_port,
-            "npu": ctx.npu.status(),
+            "npu": npu_status,
             "idle_unload": {
                 "enabled": bool(ctx.settings.get("idle_unload_enabled")),
                 "seconds": float(ctx.settings.get("idle_unload_sec") or 300),

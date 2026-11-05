@@ -162,6 +162,20 @@ class NpuManager:
         self._last_check = 0.0
         self._reachable = False
         self._version = ""
+        self._scan_cache: tuple[float, List[Dict[str, Any]]] = (0.0, [])
+
+    def _scan(self) -> List[Dict[str, Any]]:
+        """扫描结果缓存 60s：避免每次健康检查都遍历磁盘、启动 --version 子进程。"""
+        now = time.time()
+        cached_at, cached = self._scan_cache
+        if cached and now - cached_at < 60.0:
+            return cached
+        results = scan_npu_ollama(configured="")
+        self._scan_cache = (now, results)
+        return results
+
+    def invalidate_scan(self) -> None:
+        self._scan_cache = (0.0, [])
 
     # -- 属性 -------------------------------------------------------------
     @property
@@ -210,7 +224,7 @@ class NpuManager:
                         return candidate
             elif path.is_file():
                 return path
-        results = scan_npu_ollama(configured="")
+        results = self._scan()
         if not results:
             return None
         return Path(results[0]["path"])
@@ -223,7 +237,7 @@ class NpuManager:
         except Exception:
             exe = None
         managed = self._process is not None and self._process.poll() is None
-        reachable = self.reachable(force=True)
+        reachable = self.reachable()
         return {
             "enabled": self.enabled,
             "active": self.active,
