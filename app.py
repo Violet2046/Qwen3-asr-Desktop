@@ -117,17 +117,6 @@ def main(argv: Optional[List[str]] = None) -> int:
              url, settings.get("ollama_url"), settings.get("model"))
     print(f"Qwen3-ASR Desktop 已启动：{url}")
 
-    # 勾选了 Intel NPU 时，后台拉起托管的 NPU Ollama（失败不阻塞主界面）
-    if settings.get("npu_enabled"):
-        def _boot_npu() -> None:
-            try:
-                info = context.npu.start()
-                log.info("NPU：%s", info.get("message"))
-            except Exception as exc:  # noqa: BLE001
-                log.warning("NPU 启动失败：%s", exc)
-
-        threading.Thread(target=_boot_npu, name="npu-boot", daemon=True).start()
-
     runtime_file = None
     if args.runtime_file:
         try:
@@ -156,10 +145,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     finally:
         server.should_exit = True
         context.tasks.shutdown()
-        try:
-            context.npu.stop()
-        except Exception:  # noqa: BLE001
-            pass
         if runtime_file:
             try:
                 os.remove(runtime_file)

@@ -39,8 +39,7 @@
 | 任务历史 / 取消 / 删除 | ✅ | 结果持久化到 `data/tasks.json`，重启后仍可查看 |
 | 时间轴 / 分段结果 / JSON | ✅ | 由 Ollama `verbose_json` 的分段直接映射 |
 | 标点与语种 | ✅ | 模型自带标点；自动检测语种（也可在设置里指定默认语言） |
-| Intel NPU 加速 | ✅ | 自动扫描本机（含 `D:\` 根目录）支持 NPU 的 Ollama，可一键启动/停止并切换识别请求 |
-| 空闲内存回收 | ✅ | 空闲时通过 `keep_alive=0` 卸载模型，也可手动「立即释放」；NPU 实例可单独停止 |
+| 空闲内存回收 | ✅ | 空闲时通过 `keep_alive=0` 卸载模型，也可手动「立即释放」 |
 | 说话人分离 / 声纹库 | ❌ | Ollama 版不提供，界面会隐藏对应开关（接口返回 503） |
 | 音频事件标注 | ❌ | 同上 |
 
@@ -112,10 +111,6 @@ powershell -ExecutionPolicy Bypass -File .\build_electron.ps1
 | 语音门限 | -45 dBFS | 嘈杂环境建议 -40，安静环境 -50 |
 | ffmpeg 路径 | 自动查找 | 非 WAV 格式需要 ffmpeg；`pip install imageio-ffmpeg` 也会被自动识别 |
 | 本地端口 | 8765 | 修改后需重启；被占用时自动顺延 |
-| 使用 Intel NPU | 关闭 | 开启后识别请求切到 NPU 实例；保存时若实例未运行会自动尝试启动 |
-| NPU Ollama 路径 | 自动扫描 | 扫描范围含 `D:\` 根目录、常见安装目录与 PATH；找不到时提示下载 |
-| NPU 服务端口 | 11435 | 由本程序托管的 NPU Ollama 监听端口 |
-| 启动环境变量 | `OLLAMA_OPENVINO_DEVICE=NPU` | 多个用 `;` 分隔，可按所用 NPU 发行版调整 |
 | 空闲自动卸载模型 | 关闭 | 空闲超过设定秒数即卸载模型（`keep_alive=0`），服务保持运行 |
 | 空闲判定 | 300 秒 | 仅统计真实识别活动，健康检查不会重置计时 |
 
@@ -132,8 +127,7 @@ qwen3-asr-desktop/
 │  ├─ ollama.py               # Ollama 客户端（OpenAI 兼容 + /api/chat 回退 + 模型卸载）
 │  ├─ tasks.py                # 离线任务队列 + tasks.json 持久化
 │  ├─ streaming.py            # 实时流能量 VAD 分段（增量 + 定稿）
-│  ├─ npu.py                  # Intel NPU Ollama 扫描 / 托管启停
-│  ├─ server.py               # FastAPI：v2 接口 / WebSocket / 设置与 NPU、内存 API
+│  ├─ server.py               # FastAPI：v2 接口 / WebSocket / 设置与内存 API
 │  ├─ desktop.py              # 非 Electron 场景：Edge 应用窗口 / WebView2 / 浏览器回退
 │  └─ web/
 │     ├─ shell.html           # ← Electron 外壳（自绘标题栏 + 侧边栏 + 状态卡片）
@@ -172,10 +166,7 @@ qwen3-asr-desktop/
   停顿 700ms 后定稿；实际出字延迟取决于硬件——CPU 上 1.7b 每次约 2–4s，建议实时场景改用 0.6b 或启用 GPU。
 - 词级时间戳、说话人分离、声纹识别、音频事件标注依赖上游的 FunASR 模型，本便携版不包含。
 - Electron 外壳通过 iframe 内嵌上游页面（同源，支持麦克风）；若只想用浏览器，可运行 `build_portable.ps1` 产出的版本。
-- Intel NPU 需要本机安装**支持 NPU/OpenVINO 的 Ollama 发行版**；本程序只负责发现、启动并切换地址，
-  具体加速能力取决于该发行版与驱动（默认开启 `OLLAMA_OPENVINO_DEVICE=NPU`，可在设置里改）。
-- 「关闭 Ollama 服务」默认采用卸载模型的方式（`keep_alive=0`），不会影响系统里其它用到 Ollama 的程序；
-  由本程序托管的 NPU 实例可点「停止 NPU 服务」彻底结束进程。
+- 「关闭 Ollama 服务」默认采用卸载模型的方式（`keep_alive=0`），不会影响系统里其它用到 Ollama 的程序。
 - 首次启动 Electron 便携包时 Windows 可能弹出「防火墙/网络」提示，仅监听 `127.0.0.1`，拒绝即可。
 
 ## 7. 许可

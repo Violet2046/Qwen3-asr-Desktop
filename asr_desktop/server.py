@@ -15,7 +15,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import audio
-from .npu import NpuError, NpuManager, scan_npu_ollama
 from .ollama import OllamaClient, OllamaError, OllamaUnavailable
 from .settings import APP_NAME, APP_VERSION, DEFAULT_SETTINGS, LANGUAGES, Settings
 from .streaming import VadSegmenter
@@ -41,11 +40,9 @@ class _DictSettings:
 class AppContext:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.npu = NpuManager(settings)
         self.last_activity = time.time()
         self.watchdog_task: Optional[asyncio.Task] = None
-        self.tasks = TaskManager(settings, client_factory=self.active_client,
-                                 on_activity=self.touch)
+        self.tasks = TaskManager(settings, on_activity=self.touch)
         self.started_at = time.time()
         self.running_port = 0
         self._health_cache: tuple[float, Optional[Dict[str, Any]]] = (0.0, None)
@@ -54,16 +51,9 @@ class AppContext:
         """记录最近一次真实识别活动，用于空闲卸载判断。"""
         self.last_activity = time.time()
 
-    def active_client(self) -> OllamaClient:
-        """当前应使用的 Ollama 客户端：启用且可用 NPU 时指向 NPU 实例。"""
-        snapshot = self.settings.as_dict()
-        if self.npu.active:
-            snapshot["ollama_url"] = self.npu.url
-        return OllamaClient(_DictSettings(snapshot))
-
     @property
     def client(self) -> OllamaClient:
-        return self.active_client()
+        return OllamaClient(self.settings)
 
     # ------------------------------------------------------------------ health
     def health(self, force: bool = False) -> Dict[str, Any]:
@@ -94,11 +84,10 @@ class AppContext:
             message = f"未找到模型 {client.model}，请执行：ollama pull {client.model}"
 
         caps = self._capabilities()
-        npu_status = self.npu.status()
         return {
             "status": status,
             "mode": "ollama",
-            "device": "intel-npu" if npu_status.get("active") else "ollama",
+            "device": "ollama",
             "model_size": client.model,
             "align_enabled": False,
             "punc_enabled": True,
@@ -116,7 +105,6 @@ class AppContext:
             "model_available": model_ok,
             "backend_url": client.base_url,
             "app_version": APP_VERSION,
-            "npu": npu_status,
             "idle_unload": {
                 "enabled": bool(settings.get("idle_unload_enabled")),
                 "seconds": float(settings.get("idle_unload_sec") or 300),
@@ -213,7 +201,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     # ------------------------------------------------------------------ 兼容接口
     @app.get("/v2/health")
     async def health() -> Dict[str, Any]:
-        # 探测 Ollama / NPU 可能较慢，放到线程里避免阻塞事件循环
+        # 探测 Ollama 可能较慢，放到线程里避免阻塞事件循环
         return await asyncio.to_thread(ctx.health)
 
     @app.get("/v1/health", include_in_schema=False)
@@ -305,7 +293,6 @@ def create_app(ctx: AppContext) -> FastAPI:
     async def get_settings() -> Dict[str, Any]:
         data = ctx.settings.as_dict()
         ffmpeg = audio.find_ffmpeg(str(data.get("ffmpeg_path") or ""))
-        npu_status = await asyncio.to_thread(ctx.npu.status)
         return {
             "settings": data,
             "languages": LANGUAGES,
@@ -314,7 +301,6 @@ def create_app(ctx: AppContext) -> FastAPI:
             "settings_path": str(ctx.settings.path),
             "data_dir": str(ctx.settings.data_path),
             "running_port": ctx.running_port,
-            "npu": npu_status,
             "idle_unload": {
                 "enabled": bool(ctx.settings.get("idle_unload_enabled")),
                 "seconds": float(ctx.settings.get("idle_unload_sec") or 300),
@@ -342,8 +328,6 @@ def create_app(ctx: AppContext) -> FastAPI:
             raise HTTPException(status_code=400, detail="Ollama 地址必须以 http:// 或 https:// 开头")
         if "port" in clean and not (1024 <= int(clean["port"]) <= 65535):
             raise HTTPException(status_code=400, detail="端口需在 1024-65535 之间")
-        if "npu_port" in clean and not (1024 <= int(clean["npu_port"]) <= 65535):
-            raise HTTPException(status_code=400, detail="NPU 端口需在 1024-65535 之间")
         restart = ctx.settings.update(clean)
         ctx._health_cache = (0.0, None)
         logger.info("设置已更新：%s", ", ".join(clean.keys()))
@@ -382,37 +366,9 @@ def create_app(ctx: AppContext) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return {"models": models}
 
-    # ------------------------------------------------------------------ Intel NPU
-    @app.get("/api/npu/scan")
-    async def npu_scan() -> Dict[str, Any]:
-        results = await asyncio.to_thread(
-            scan_npu_ollama, str(ctx.settings.get("npu_ollama_path") or "")
-        )
-        return {
-            "results": results,
-            "found": bool(results),
-            "download_url": str(ctx.settings.get("npu_download_url") or ""),
-        }
-
-    @app.get("/api/npu/status")
-    async def npu_status() -> Dict[str, Any]:
-        return await asyncio.to_thread(ctx.npu.status)
-
-    @app.post("/api/npu/start")
-    async def npu_start() -> Dict[str, Any]:
-        try:
-            return await asyncio.to_thread(ctx.npu.start)
-        except NpuError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.post("/api/npu/stop")
-    async def npu_stop() -> Dict[str, Any]:
-        return await asyncio.to_thread(ctx.npu.stop)
-
     # ------------------------------------------------------------------ 内存回收
     @app.post("/api/ollama/unload")
     async def ollama_unload() -> Dict[str, Any]:
-        target = "NPU Ollama" if ctx.npu.active else "Ollama"
         try:
             unloaded = await asyncio.to_thread(ctx.client.unload)
         except OllamaError as exc:
@@ -421,8 +377,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         return {
             "ok": True,
             "unloaded": unloaded,
-            "message": (f"{target} 已卸载 {len(unloaded)} 个模型" if unloaded
-                        else f"{target} 当前没有驻留模型"),
+            "message": (f"已卸载 {len(unloaded)} 个模型" if unloaded
+                        else "当前没有驻留模型"),
         }
 
     # ------------------------------------------------------------------ 实时转写
@@ -699,11 +655,11 @@ def _truthy(value: Any) -> bool:
 
 
 def _coerce(key: str, value: Any) -> Any:
-    if key in ("port", "npu_port"):
+    if key in ("port",):
         try:
             return int(str(value).strip())
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"{key} 必须是整数") from exc
+            raise HTTPException(status_code=400, detail="端口必须是整数") from exc
     if key in ("timeout", "stream_end_silence_ms", "stream_min_speech_ms",
                "stream_max_segment_sec", "stream_partial_interval_ms",
                "vad_threshold_dbfs", "idle_unload_sec"):
@@ -711,6 +667,6 @@ def _coerce(key: str, value: Any) -> Any:
             return float(value)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"{key} 必须是数字") from exc
-    if key in ("stream_enabled", "npu_enabled", "idle_unload_enabled"):
+    if key in ("stream_enabled", "idle_unload_enabled"):
         return bool(value) if isinstance(value, bool) else _truthy(value)
     return str(value).strip() if isinstance(value, str) else value
