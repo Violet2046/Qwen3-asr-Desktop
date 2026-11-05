@@ -172,6 +172,38 @@ class OllamaClient:
             message += f"，但未找到模型 {self.model}，请执行：ollama pull {self.model}"
         return {"ok": found, "message": message, "version": version, "models": models}
 
+    # ------------------------------------------------------------------ 内存回收
+    def running_models(self) -> List[str]:
+        """列出当前驻留显存/内存的模型。"""
+        status, body = self._request("/api/ps", timeout=8)
+        if status != 200:
+            return []
+        data = self._json(body)
+        names: List[str] = []
+        for item in data.get("models", []):
+            name = item.get("name") or item.get("model")
+            if name:
+                names.append(str(name))
+        return names
+
+    def unload(self) -> List[str]:
+        """通过 keep_alive=0 让 Ollama 立即卸载模型，释放内存（服务本身继续运行）。"""
+        names = self.running_models()
+        if not names:
+            return []
+        unloaded: List[str] = []
+        for name in names:
+            payload = {"model": name, "keep_alive": 0, "prompt": ""}
+            status, _ = self._request(
+                "/api/generate",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                timeout=30,
+            )
+            if status < 400:
+                unloaded.append(name)
+        return unloaded
+
     # ------------------------------------------------------------------ 转写
     def transcribe_file(self, path: str, language: str = "",
                         on_progress: Optional[ProgressCb] = None) -> AsrResult:

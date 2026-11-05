@@ -45,7 +45,7 @@ try {
     }
 
     # 清掉旧产物，避免 electron-builder 复用上一次的 resources/backend
-    $electronOut = Join-Path $PSScriptRoot 'dist-app'
+    $electronOut = Join-Path $PSScriptRoot 'release'
     if (Test-Path $electronOut) { Remove-Item $electronOut -Recurse -Force }
     $backendOut = Join-Path $PSScriptRoot 'dist\Qwen3-ASR-Desktop'
     Remove-Item (Join-Path $backendOut 'settings.json') -Force -ErrorAction SilentlyContinue
@@ -57,7 +57,7 @@ try {
     Pop-Location
 }
 
-$out = Join-Path $PSScriptRoot 'dist-app\win-unpacked'
+$out = Join-Path $PSScriptRoot 'release\win-unpacked'
 Copy-Item -Force (Join-Path $PSScriptRoot 'README.md') $out
 Copy-Item -Force (Join-Path $PSScriptRoot 'LICENSE') $out
 Copy-Item -Force (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $out
@@ -67,7 +67,7 @@ $startBat = Join-Path $out 'Start.bat'
 Set-Content -Path $startBat -Value "@echo off`r`nstart `"`" `"%~dp0Qwen3-ASR Desktop.exe`"" -Encoding ASCII
 
 $appVersion = (Get-Content (Join-Path $PSScriptRoot 'electron\package.json') -Raw | ConvertFrom-Json).version
-$zipPath = Join-Path $PSScriptRoot ("dist-app\Qwen3-ASR-Desktop-portable-win-x64-v{0}.zip" -f $appVersion)
+$zipPath = Join-Path $PSScriptRoot ("release\Qwen3-ASR-Desktop-portable-win-x64-v{0}.zip" -f $appVersion)
 
 $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $python)) { $python = 'python' }

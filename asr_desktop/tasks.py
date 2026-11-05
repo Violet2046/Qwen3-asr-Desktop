@@ -42,9 +42,12 @@ class Task:
 
 
 class TaskManager:
-    def __init__(self, settings, max_workers: int = 1) -> None:
+    def __init__(self, settings, max_workers: int = 1, client_factory=None,
+                 on_activity=None) -> None:
         self.settings = settings
-        self.client = OllamaClient(settings)
+        # 每次任务重新取客户端，便于在 NPU / 普通 Ollama 之间切换
+        self._client_factory = client_factory or (lambda: OllamaClient(settings))
+        self._on_activity = on_activity
         self._tasks: "OrderedDict[str, Task]" = OrderedDict()
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="asr-task")
@@ -71,7 +74,9 @@ class TaskManager:
         task.status = "processing"
         task.progress = 0.02
         try:
-            result = self.client.transcribe_file(
+            if self._on_activity:
+                self._on_activity()
+            result = self._client_factory().transcribe_file(
                 path, task.language or "", self._progress_cb(task)
             )
             if task.cancel_event.is_set():

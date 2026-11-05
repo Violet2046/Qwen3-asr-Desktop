@@ -61,6 +61,16 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "vad_threshold_dbfs": -45,
     "ffmpeg_path": "",
     "data_dir": "data",
+    # Intel NPU 加速
+    "npu_enabled": False,
+    "npu_ollama_path": "",
+    "npu_port": 11435,
+    "npu_extra_args": "serve",
+    "npu_env": "OLLAMA_OPENVINO_DEVICE=NPU",
+    "npu_download_url": "https://github.com/search?q=ollama+intel+npu&type=repositories",
+    # 空闲内存回收
+    "idle_unload_enabled": False,
+    "idle_unload_sec": 300,
 }
 
 

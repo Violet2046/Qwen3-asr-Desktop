@@ -9,6 +9,7 @@ build/
 dist/
 dist-app/
 dist-electron/
+release/
 *.spec
 *.zip
 

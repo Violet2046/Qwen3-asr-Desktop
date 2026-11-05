@@ -171,6 +171,62 @@
   </section>
 
   <section class="card">
+    <div class="card-title">Intel NPU 加速</div>
+    <div class="card-sub">启用后优先使用本机支持 Intel NPU 的 Ollama 实例识别；未检测到时会提示下载。</div>
+
+    <div class="field">
+      <label class="switch"><input type="checkbox" id="npu_enabled"> 使用 Intel NPU 运行模型</label>
+    </div>
+
+    <div class="field">
+      <label for="npu_ollama_path">NPU Ollama 路径</label>
+      <div class="row">
+        <input class="inp" id="npu_ollama_path" placeholder="例如 D:\ollama\npu\ollama.exe（留空自动扫描）" spellcheck="false">
+        <button class="btn" id="btnScanNpu" type="button">自动扫描</button>
+      </div>
+      <span class="hint" id="npuHint">扫描范围：D 盘根目录、常见安装目录与 PATH。</span>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="npu_port">NPU 服务端口</label>
+        <input class="inp" id="npu_port" type="number" min="1024" max="65535">
+      </div>
+      <div class="field">
+        <label for="npu_env">启动环境变量</label>
+        <input class="inp" id="npu_env" placeholder="OLLAMA_OPENVINO_DEVICE=NPU" spellcheck="false">
+        <span class="hint">多个用分号分隔，例如 OLLAMA_OPENVINO_DEVICE=NPU;GGML_OPENVINO_DEVICE=NPU</span>
+      </div>
+    </div>
+
+    <div class="actions" style="margin-top:4px;">
+      <button class="btn" id="btnStartNpu" type="button">启动 NPU 服务</button>
+      <button class="btn" id="btnStopNpu" type="button">停止 NPU 服务</button>
+      <button class="btn" id="btnDownloadNpu" type="button">下载 NPU 版 Ollama</button>
+    </div>
+    <div class="status" id="npuStatus"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">内存占用</div>
+    <div class="card-sub">空闲时自动卸载模型（keep_alive=0）释放内存与显存，Ollama 服务保持运行；NPU 实例可点上方「停止 NPU 服务」彻底关闭。</div>
+
+    <div class="field">
+      <label class="switch"><input type="checkbox" id="idle_unload_enabled"> 空闲自动卸载模型</label>
+    </div>
+
+    <div class="field" style="max-width:260px;">
+      <label for="idle_unload_sec">空闲判定（秒）</label>
+      <input class="inp" id="idle_unload_sec" type="number" min="30" max="86400" step="30">
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="btnUnload" type="button">立即释放 Ollama 内存</button>
+    </div>
+    <div class="status" id="memStatus"></div>
+  </section>
+
+  <section class="card">
     <div class="card-title">运行环境</div>
 
     <div class="field">
@@ -200,11 +256,17 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
+  let npuDownloadUrl = '';
 
-  function showStatus(text, kind) {
-    const box = $('status');
+  function showBox(id, text, kind) {
+    const box = $(id);
+    if (!box) return;
     box.textContent = text;
     box.className = 'status show ' + (kind || 'info');
+  }
+
+  function showStatus(text, kind) {
+    showBox('status', text, kind);
   }
 
   function fillSelect(select, items, value) {
@@ -235,7 +297,13 @@
       stream_partial_interval_ms: Number($('stream_partial_interval_ms').value || 700),
       vad_threshold_dbfs: Number($('vad_threshold_dbfs').value || -45),
       ffmpeg_path: $('ffmpeg_path').value.trim(),
-      port: Number($('port').value || 8765)
+      port: Number($('port').value || 8765),
+      npu_enabled: $('npu_enabled').checked,
+      npu_ollama_path: $('npu_ollama_path').value.trim(),
+      npu_port: Number($('npu_port').value || 11435),
+      npu_env: $('npu_env').value.trim(),
+      idle_unload_enabled: $('idle_unload_enabled').checked,
+      idle_unload_sec: Number($('idle_unload_sec').value || 300)
     };
   }
 
@@ -267,6 +335,14 @@
       $('vad_threshold_dbfs').value = s.vad_threshold_dbfs;
       $('ffmpeg_path').value = s.ffmpeg_path || '';
       $('port').value = s.port;
+      $('npu_enabled').checked = !!s.npu_enabled;
+      $('npu_ollama_path').value = s.npu_ollama_path || '';
+      $('npu_port').value = s.npu_port;
+      $('npu_env').value = s.npu_env || '';
+      $('idle_unload_enabled').checked = !!s.idle_unload_enabled;
+      $('idle_unload_sec').value = s.idle_unload_sec;
+      npuDownloadUrl = (data.npu && data.npu.download_url) || '';
+      renderNpuStatus(data.npu || {});
       $('ffmpegStatus').textContent = data.ffmpeg
         ? ('已检测到 ffmpeg：' + data.ffmpeg)
         : '未检测到 ffmpeg：此时只能直接转写 WAV（其他格式需 ffmpeg）';
@@ -298,6 +374,92 @@
     }
   }
 
+  function renderNpuStatus(st) {
+    const parts = [];
+    if (!st.enabled) parts.push('NPU 未启用（识别走普通 Ollama）');
+    else if (st.active) parts.push('NPU 运行中');
+    else if (st.reachable) parts.push('NPU 实例可达');
+    else parts.push('NPU 未运行');
+    if (st.managed) parts.push('由本程序托管');
+    if (st.version) parts.push('版本 ' + st.version);
+    if (st.url) parts.push(st.url);
+    showBox('npuStatus', parts.join(' · '), st.active ? 'ok' : (st.enabled ? 'err' : 'info'));
+    $('npuHint').textContent = st.exe
+      ? ('当前候选：' + st.exe + (st.reachable ? '' : '（尚未运行，可点「启动 NPU 服务」）'))
+      : '未检测到 NPU Ollama，点击「自动扫描」或手动填写路径。';
+  }
+
+  async function scanNpu() {
+    const btn = $('btnScanNpu');
+    btn.disabled = true;
+    showBox('npuStatus', '正在扫描本机 Ollama（含 D 盘根目录）…', 'info');
+    try {
+      const data = await request('/api/npu/scan');
+      npuDownloadUrl = data.download_url || npuDownloadUrl;
+      const results = data.results || [];
+      if (!results.length) {
+        showBox('npuStatus',
+          '未找到 ollama.exe。\n可点击「下载 NPU 版 Ollama」，解压到 D 盘根目录后再次扫描，或手动填写 ollama.exe 路径。',
+          'err');
+        return;
+      }
+      const best = results.find((r) => r.npu_hint) || results[0];
+      $('npu_ollama_path').value = best.path;
+      const lines = results.map((r) => (r.npu_hint ? '[NPU] ' : '      ') + r.path +
+        (r.version ? '  v' + r.version : ''));
+      showBox('npuStatus', '找到 ' + results.length + ' 个候选：\n' + lines.join('\n'), 'ok');
+      $('npuHint').textContent = '已选择：' + best.path +
+        (best.npu_hint ? '（检测到 NPU/OpenVINO 特征）' : '（未检测到 NPU 特征，请确认是 NPU 版本）');
+    } catch (err) {
+      showBox('npuStatus', '扫描失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function startNpu(silent) {
+    const btn = $('btnStartNpu');
+    btn.disabled = true;
+    if (!silent) showBox('npuStatus', '正在启动 NPU Ollama（首次启动可能需要数十秒）…', 'info');
+    try {
+      const data = await request('/api/npu/start', { method: 'POST' });
+      renderNpuStatus(data);
+      if (!silent) showBox('npuStatus', data.message || 'NPU 服务已启动', 'ok');
+    } catch (err) {
+      showBox('npuStatus', '启动失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function stopNpu() {
+    const btn = $('btnStopNpu');
+    btn.disabled = true;
+    try {
+      const data = await request('/api/npu/stop', { method: 'POST' });
+      renderNpuStatus(data);
+      showBox('npuStatus', data.message || '已停止', 'info');
+    } catch (err) {
+      showBox('npuStatus', '停止失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function unloadOllama() {
+    const btn = $('btnUnload');
+    btn.disabled = true;
+    showBox('memStatus', '正在卸载模型…', 'info');
+    try {
+      const data = await request('/api/ollama/unload', { method: 'POST' });
+      showBox('memStatus', data.message || '已释放', 'ok');
+    } catch (err) {
+      showBox('memStatus', '释放失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function save() {
     const btn = $('saveBtn');
     btn.disabled = true;
@@ -308,6 +470,12 @@
         body: JSON.stringify(collect())
       });
       showStatus(data.message || '已保存', data.restart_required && data.restart_required.length ? 'info' : 'ok');
+      // 勾选 NPU 但实例尚未运行时，保存后自动尝试启动
+      if ($('npu_enabled').checked) {
+        const st = await request('/api/npu/status').catch(() => null);
+        if (st && !st.active) await startNpu(true);
+        else if (st) renderNpuStatus(st);
+      }
     } catch (err) {
       showStatus('保存失败：' + err.message, 'err');
     } finally {
@@ -337,6 +505,13 @@
   $('saveBtn').addEventListener('click', save);
   $('testBtn').addEventListener('click', test);
   $('refreshModels').addEventListener('click', () => refreshModels(false));
+  $('btnScanNpu').addEventListener('click', scanNpu);
+  $('btnStartNpu').addEventListener('click', () => startNpu(false));
+  $('btnStopNpu').addEventListener('click', stopNpu);
+  $('btnUnload').addEventListener('click', unloadOllama);
+  $('btnDownloadNpu').addEventListener('click', () => {
+    window.open(npuDownloadUrl || 'https://github.com/search?q=ollama+intel+npu&type=repositories', '_blank');
+  });
   load();
 })();
 </script>

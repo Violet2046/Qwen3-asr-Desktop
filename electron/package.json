@@ -13,9 +13,9 @@
   "build": {
     "appId": "com.local.qwen3asr.desktop",
     "productName": "Qwen3-ASR Desktop",
-    "asar": true,
+    "asar": false,
     "directories": {
-      "output": "../dist-app"
+      "output": "../release"
     },
     "files": [
       "main.js",
