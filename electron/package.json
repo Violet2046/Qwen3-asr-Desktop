@@ -1,0 +1,52 @@
+{
+  "name": "qwen3-asr-desktop",
+  "version": "1.0.0",
+  "description": "Qwen3-ASR desktop client with Ollama backend (Electron shell)",
+  "main": "main.js",
+  "author": "Qwen3-ASR Desktop",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.local.qwen3asr.desktop",
+    "productName": "Qwen3-ASR Desktop",
+    "asar": true,
+    "directories": {
+      "output": "../dist-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "assets/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/Qwen3-ASR-Desktop",
+        "to": "backend"
+      },
+      {
+        "from": "../README.md",
+        "to": "README.md"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  }
+}

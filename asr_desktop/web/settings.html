@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置 - Qwen3-ASR Desktop</title>
+<link rel="stylesheet" href="/web-ui/assets/app.css">
+<style>
+  body.dark { background: #0f1115; color: #e2e8f0; }
+  .settings-wrap { max-width: 900px; margin: 0 auto; padding: 30px clamp(16px, 4vw, 32px) 70px; position: relative; z-index: 1; }
+  .page-head { margin-bottom: 22px; }
+  .page-head h1 { font-size: 1.5em; letter-spacing: .2px; }
+  .page-head p { color: #94a3b8; font-size: .86em; margin-top: 8px; line-height: 1.7; }
+  .card { background: rgba(148, 163, 184, .06); border: 1px solid rgba(255, 255, 255, .08);
+          border-radius: 14px; padding: 22px 24px 24px; margin-bottom: 18px; }
+  .card-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: .98em; margin-bottom: 4px; }
+  .card-title::before { content: ''; width: 4px; height: 15px; border-radius: 2px; background: var(--accent); }
+  .card-sub { color: #64748b; font-size: .8em; margin: 6px 0 18px 12px; line-height: 1.6; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .field > label { font-size: .82em; color: #94a3b8; }
+  .field .hint { font-size: .74em; color: #64748b; line-height: 1.6; }
+  .inp { width: 100%; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .12);
+         border-radius: 8px; padding: 9px 12px; color: #e2e8f0; font-size: .9em; outline: none;
+         font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
+  .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(20, 184, 166, .15); }
+  select.inp { appearance: none; background-image: linear-gradient(45deg, transparent 50%, #64748b 50%),
+               linear-gradient(135deg, #64748b 50%, transparent 50%);
+               background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+               background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 34px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 18px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row .inp { flex: 1; }
+  .btn { border: 1px solid rgba(255, 255, 255, .14); background: rgba(148, 163, 184, .08); color: #e2e8f0;
+         border-radius: 9px; padding: 9px 18px; font-size: .86em; font-weight: 600; cursor: pointer;
+         font-family: inherit; transition: all .15s ease; }
+  .btn:hover { border-color: rgba(20, 184, 166, .5); color: #2dd4bf; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #04211d; }
+  .btn.primary:hover { background: #2dd4bf; color: #04211d; }
+  .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: .88em; }
+  .switch input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
+  .status { margin-top: 16px; font-size: .86em; padding: 11px 14px; border-radius: 9px; display: none; line-height: 1.65; white-space: pre-wrap; }
+  .status.show { display: block; }
+  .status.ok { background: rgba(20, 184, 166, .12); border: 1px solid rgba(20, 184, 166, .35); color: #5eead4; }
+  .status.err { background: rgba(239, 68, 68, .12); border: 1px solid rgba(239, 68, 68, .35); color: #fca5a5; }
+  .status.info { background: rgba(148, 163, 184, .1); border: 1px solid rgba(148, 163, 184, .25); color: #cbd5e1; }
+  .kv { font-family: var(--mono); font-size: .78em; color: #64748b; line-height: 1.9; word-break: break-all; }
+  .kv b { color: #94a3b8; font-weight: 600; }
+  code.cmd { display: block; background: rgba(0, 0, 0, .35); border: 1px solid rgba(255, 255, 255, .08);
+             border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: .8em; color: #5eead4;
+             margin-top: 8px; word-break: break-all; }
+  .inp:disabled { opacity: .45; }
+  .divider { height: 1px; background: rgba(255, 255, 255, .07); margin: 18px 0; }
+  @media (max-width: 720px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  /* Electron 外壳内嵌模式：隐藏自身应用栏 */
+  body.embed .appbar { display: none !important; }
+  body.embed .settings-wrap { padding-top: 16px; }
+</style>
+<script>
+  if (location.search.indexOf('embed=1') >= 0) {
+    document.addEventListener('DOMContentLoaded', function () { document.body.classList.add('embed'); });
+  }
+</script>
+</head>
+<body class="dark">
+<header class="appbar">
+  <div class="appbar-inner">
+    <a class="brand" href="/web-ui">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/>
+      </svg>
+      <span>Qwen3-ASR</span>
+    </a>
+    <nav class="appnav">
+      <a href="/web-ui">离线转写</a>
+      <a href="/web-ui/stream">实时转写</a>
+      <a href="/web-ui/speakers">说话人</a>
+      <a href="/web-ui/docs" target="_blank" rel="noopener">文档</a>
+    </nav>
+    <div class="appbar-right">
+      <a class="iconbtn" href="/web-ui/settings" title="设置 / Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main class="settings-wrap">
+  <div class="page-head">
+    <h1>设置</h1>
+    <p>Qwen3-ASR Desktop 复用 <b>Qwen3-ASR-Service</b> 的 Web UI 与接口形态，语音识别由本机（或局域网）的 Ollama 完成。
+       修改后点击「保存」，返回主界面刷新即可生效。</p>
+  </div>
+
+  <section class="card">
+    <div class="card-title">Ollama 连接</div>
+    <div class="card-sub">推荐使用 Ollama ≥ 0.40（支持音频输入的 OpenAI 兼容转写接口）。</div>
+
+    <div class="field">
+      <label for="ollama_url">服务地址</label>
+      <input class="inp" id="ollama_url" placeholder="http://127.0.0.1:11434" spellcheck="false">
+      <span class="hint">本机默认 http://127.0.0.1:11434；局域网可填 http://IP:11434</span>
+    </div>
+
+    <div class="field">
+      <label for="model">模型</label>
+      <div class="row">
+        <input class="inp" id="model" list="model-list" placeholder="frozenlab/qwen3-asr:1.7b" spellcheck="false">
+        <button class="btn" id="refreshModels" type="button">刷新列表</button>
+      </div>
+      <datalist id="model-list"></datalist>
+      <span class="hint">若尚未下载：<code>ollama pull frozenlab/qwen3-asr:1.7b</code>（0.6b 更快，1.7b 更准）</span>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="ollama_mode">接口模式</label>
+        <select class="inp" id="ollama_mode"></select>
+        <span class="hint">新版 Ollama 用 OpenAI 兼容接口；若提示 404 可切换为 /api/chat。</span>
+      </div>
+      <div class="field">
+        <label for="language">默认识别语言</label>
+        <select class="inp" id="language"></select>
+        <span class="hint">主界面未单独选择语言时使用该设置。</span>
+      </div>
+    </div>
+
+    <div class="field" style="max-width:260px;">
+      <label for="timeout">请求超时（秒）</label>
+      <input class="inp" id="timeout" type="number" min="10" max="3600" step="10">
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">实时转写</div>
+    <div class="card-sub">基于能量检测自动断句，每句送 Ollama 识别；静音越短出字越快。</div>
+
+    <div class="field">
+      <label class="switch"><input type="checkbox" id="stream_enabled"> 启用实时转写</label>
+    </div>
+
+    <div class="grid3">
+      <div class="field">
+        <label for="stream_end_silence_ms">断句静音（ms）</label>
+        <input class="inp" id="stream_end_silence_ms" type="number" min="200" max="3000" step="50">
+      </div>
+      <div class="field">
+        <label for="stream_min_speech_ms">最短语音（ms）</label>
+        <input class="inp" id="stream_min_speech_ms" type="number" min="60" max="3000" step="10">
+      </div>
+      <div class="field">
+        <label for="stream_max_segment_sec">最长分段（秒）</label>
+        <input class="inp" id="stream_max_segment_sec" type="number" min="1" max="55" step="1">
+      </div>
+    </div>
+
+    <div class="field" style="max-width:260px;">
+      <label for="vad_threshold_dbfs">语音门限（dBFS）</label>
+      <input class="inp" id="vad_threshold_dbfs" type="number" min="-90" max="0" step="1">
+      <span class="hint">环境嘈杂可调到 -40，安静环境可用 -50。</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">运行环境</div>
+
+    <div class="field">
+      <label for="ffmpeg_path">ffmpeg 路径（可选）</label>
+      <input class="inp" id="ffmpeg_path" placeholder="留空自动查找" spellcheck="false">
+      <span class="hint" id="ffmpegStatus"></span>
+    </div>
+
+    <div class="field" style="max-width:260px;">
+      <label for="port">本地服务端口</label>
+      <input class="inp" id="port" type="number" min="1024" max="65535">
+      <span class="hint">修改后需重启程序；端口被占用时会自动顺延。</span>
+    </div>
+
+    <div class="divider"></div>
+    <div class="kv" id="paths"></div>
+  </section>
+
+  <div class="actions">
+    <button class="btn primary" id="saveBtn" type="button">保存设置</button>
+    <button class="btn" id="testBtn" type="button">测试连接</button>
+    <a class="btn" href="/web-ui" style="text-decoration:none;">返回主界面</a>
+  </div>
+  <div class="status" id="status"></div>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  function showStatus(text, kind) {
+    const box = $('status');
+    box.textContent = text;
+    box.className = 'status show ' + (kind || 'info');
+  }
+
+  function fillSelect(select, items, value) {
+    select.innerHTML = items.map((it) => {
+      const v = String(it.value == null ? '' : it.value);
+      return '<option value="' + v.replace(/"/g, '&quot;') + '">' + it.label + '</option>';
+    }).join('');
+    select.value = value == null ? '' : String(value);
+  }
+
+  function fillModels(models, current) {
+    const list = $('model-list');
+    list.innerHTML = (models || []).map((m) => '<option value="' + m + '"></option>').join('');
+    if (current) $('model').value = current;
+  }
+
+  function collect() {
+    return {
+      ollama_url: $('ollama_url').value.trim(),
+      model: $('model').value.trim(),
+      ollama_mode: $('ollama_mode').value,
+      language: $('language').value,
+      timeout: Number($('timeout').value || 300),
+      stream_enabled: $('stream_enabled').checked,
+      stream_end_silence_ms: Number($('stream_end_silence_ms').value || 900),
+      stream_min_speech_ms: Number($('stream_min_speech_ms').value || 250),
+      stream_max_segment_sec: Number($('stream_max_segment_sec').value || 20),
+      vad_threshold_dbfs: Number($('vad_threshold_dbfs').value || -45),
+      ffmpeg_path: $('ffmpeg_path').value.trim(),
+      port: Number($('port').value || 8765)
+    };
+  }
+
+  async function request(url, options) {
+    const res = await fetch(url, options);
+    let body = null;
+    try { body = await res.json(); } catch (e) { /* 非 JSON */ }
+    if (!res.ok) {
+      const detail = body && body.detail ? body.detail : ('HTTP ' + res.status);
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    return body || {};
+  }
+
+  async function load() {
+    try {
+      const data = await request('/api/settings');
+      const s = data.settings;
+      $('ollama_url').value = s.ollama_url || '';
+      $('model').value = s.model || '';
+      fillSelect($('ollama_mode'), data.ollama_modes || [], s.ollama_mode);
+      fillSelect($('language'), data.languages || [], s.language);
+      $('timeout').value = s.timeout;
+      $('stream_enabled').checked = !!s.stream_enabled;
+      $('stream_end_silence_ms').value = s.stream_end_silence_ms;
+      $('stream_min_speech_ms').value = s.stream_min_speech_ms;
+      $('stream_max_segment_sec').value = s.stream_max_segment_sec;
+      $('vad_threshold_dbfs').value = s.vad_threshold_dbfs;
+      $('ffmpeg_path').value = s.ffmpeg_path || '';
+      $('port').value = s.port;
+      $('ffmpegStatus').textContent = data.ffmpeg
+        ? ('已检测到 ffmpeg：' + data.ffmpeg)
+        : '未检测到 ffmpeg：此时只能直接转写 WAV（其他格式需 ffmpeg）';
+      $('paths').innerHTML =
+        '<b>程序版本</b> ' + data.app.name + ' v' + data.app.version + '<br>' +
+        '<b>运行端口</b> ' + (data.running_port || '?') + '<br>' +
+        '<b>配置文件</b> ' + data.settings_path + '<br>' +
+        '<b>数据目录</b> ' + data.data_dir;
+      refreshModels(true);
+    } catch (err) {
+      showStatus('读取设置失败：' + err.message, 'err');
+    }
+  }
+
+  async function refreshModels(silent) {
+    const btn = $('refreshModels');
+    btn.disabled = true;
+    try {
+      const url = '/api/models?url=' + encodeURIComponent($('ollama_url').value.trim());
+      const data = await request(url);
+      fillModels(data.models || [], $('model').value);
+      if (!silent) {
+        showStatus('已获取 ' + (data.models || []).length + ' 个模型', (data.models || []).length ? 'ok' : 'err');
+      }
+    } catch (err) {
+      if (!silent) showStatus('获取模型列表失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function save() {
+    const btn = $('saveBtn');
+    btn.disabled = true;
+    try {
+      const data = await request('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collect())
+      });
+      showStatus(data.message || '已保存', data.restart_required && data.restart_required.length ? 'info' : 'ok');
+    } catch (err) {
+      showStatus('保存失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function test() {
+    const btn = $('testBtn');
+    btn.disabled = true;
+    showStatus('正在测试连接…', 'info');
+    try {
+      const data = await request('/api/settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ollama_url: $('ollama_url').value.trim(), model: $('model').value.trim() })
+      });
+      fillModels(data.models || [], $('model').value);
+      showStatus(data.message || (data.ok ? '连接成功' : '连接失败'), data.ok ? 'ok' : 'err');
+    } catch (err) {
+      showStatus('测试失败：' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $('saveBtn').addEventListener('click', save);
+  $('testBtn').addEventListener('click', test);
+  $('refreshModels').addEventListener('click', () => refreshModels(false));
+  load();
+})();
+</script>
+</body>
+</html>

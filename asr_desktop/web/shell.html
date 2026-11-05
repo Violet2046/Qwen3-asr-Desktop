@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qwen3-ASR Desktop</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --bg-2: #0e141c;
+    --panel: rgba(18, 25, 35, .72);
+    --panel-2: rgba(23, 32, 45, .9);
+    --line: rgba(148, 163, 184, .13);
+    --line-strong: rgba(148, 163, 184, .22);
+    --text: #e6edf5;
+    --muted: #8b9bb0;
+    --dim: #5d6b7e;
+    --accent: #14b8a6;
+    --accent-2: #2dd4bf;
+    --accent-dim: rgba(20, 184, 166, .14);
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --font: "Inter", "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(900px 420px at 18% -10%, rgba(20, 184, 166, .12), transparent 65%),
+      radial-gradient(720px 380px at 92% 0%, rgba(56, 189, 248, .07), transparent 62%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  .app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ---------------------------------------------------------------- 标题栏 */
+  .titlebar {
+    height: 46px; flex: 0 0 46px; display: flex; align-items: center;
+    padding-left: 14px; gap: 10px; position: relative; z-index: 20;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(23, 32, 45, .55), rgba(10, 14, 20, .2));
+    -webkit-app-region: drag;
+  }
+  .titlebar::after {
+    content: ''; position: absolute; inset: auto 0 -1px 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(45, 212, 191, .35), transparent);
+    opacity: .7;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent) 0%, #0d9488 55%, #0f766e 100%);
+    box-shadow: 0 4px 14px rgba(20, 184, 166, .35), inset 0 1px 0 rgba(255, 255, 255, .25);
+  }
+  .logo svg { color: #04211d; }
+  .title { font-size: 13px; font-weight: 650; letter-spacing: .3px; color: #dbe6f2; }
+  .title em { font-style: normal; color: var(--dim); font-weight: 500; margin-left: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 9px;
+    border-radius: 99px; font-size: 10px; font-weight: 700; letter-spacing: .8px;
+    color: var(--accent-2); background: var(--accent-dim);
+    border: 1px solid rgba(45, 212, 191, .22); text-transform: uppercase;
+  }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .drag-fill { flex: 1; height: 100%; }
+
+  .win-controls { display: flex; height: 100%; -webkit-app-region: no-drag; }
+  .win-controls button {
+    width: 46px; height: 100%; border: 0; background: transparent; color: var(--muted);
+    display: grid; place-items: center; cursor: pointer; transition: background .15s ease, color .15s ease;
+  }
+  .win-controls button:hover { background: rgba(148, 163, 184, .12); color: var(--text); }
+  .win-controls button.close:hover { background: #c0392b; color: #fff; }
+  .win-controls svg { pointer-events: none; }
+
+  /* ---------------------------------------------------------------- 布局 */
+  .layout { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------------------------------------------------------------- 侧边栏 */
+  .sidebar {
+    width: 232px; flex: 0 0 232px; display: flex; flex-direction: column;
+    padding: 16px 12px 14px; gap: 14px;
+    border-right: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(15, 21, 30, .85), rgba(10, 14, 20, .92));
+  }
+  .nav-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.4px; color: var(--dim);
+    padding: 4px 10px 2px;
+  }
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav button {
+    position: relative; display: flex; align-items: center; gap: 11px;
+    width: 100%; padding: 10px 12px; border: 1px solid transparent; border-radius: 10px;
+    background: transparent; color: var(--muted); font-family: inherit; font-size: 13px;
+    font-weight: 550; cursor: pointer; text-align: left;
+    transition: background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease;
+  }
+  .nav button svg { flex: 0 0 auto; opacity: .85; }
+  .nav button:hover { background: rgba(148, 163, 184, .07); color: #cfdae7; }
+  .nav button.active {
+    color: #ecfffb; background: linear-gradient(90deg, rgba(20, 184, 166, .18), rgba(20, 184, 166, .04));
+    border-color: rgba(45, 212, 191, .22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+  }
+  .nav button.active::before {
+    content: ''; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent-2);
+    box-shadow: 0 0 12px rgba(45, 212, 191, .6);
+  }
+  .nav button .kbd {
+    margin-left: auto; font-family: var(--mono); font-size: 9.5px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px;
+  }
+  .nav button.active .kbd { color: rgba(236, 255, 251, .5); border-color: rgba(45, 212, 191, .25); }
+
+  .spacer { flex: 1; }
+
+  .status-card {
+    border: 1px solid var(--line); border-radius: 14px; padding: 13px 13px 11px;
+    background: linear-gradient(180deg, rgba(23, 32, 45, .75), rgba(15, 21, 30, .85));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25), inset 0 1px 0 rgba(255, 255, 255, .03);
+  }
+  .status-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 10px rgba(52, 211, 153, .75); animation: pulse 2.4s ease-in-out infinite; }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 10px rgba(251, 191, 36, .6); }
+  .dot.err { background: var(--err); box-shadow: 0 0 10px rgba(248, 113, 113, .6); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .status-title { font-size: 12px; font-weight: 650; color: #d9e4f0; }
+  .status-sub { font-size: 10.5px; color: var(--dim); margin-top: 2px; line-height: 1.5; word-break: break-all; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; padding: 3px 0; }
+  .kv span { color: var(--dim); }
+  .kv b { font-weight: 550; color: #b9c6d6; font-family: var(--mono); font-size: 10.5px;
+          max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status-actions { display: flex; gap: 6px; margin-top: 10px; }
+  .status-actions button {
+    flex: 1; border: 1px solid var(--line); background: rgba(148, 163, 184, .06); color: var(--muted);
+    border-radius: 8px; padding: 6px 0; font-family: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all .15s ease;
+  }
+  .status-actions button:hover { color: var(--accent-2); border-color: rgba(45, 212, 191, .35); background: rgba(20, 184, 166, .1); }
+
+  /* ---------------------------------------------------------------- 内容区 */
+  .stage { flex: 1; min-width: 0; padding: 14px 16px 16px 16px; display: flex; }
+  .stage-inner {
+    position: relative; flex: 1; min-width: 0; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(16, 23, 33, .92), rgba(11, 16, 23, .96));
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .035);
+  }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+  .loading {
+    position: absolute; inset: 0; display: grid; place-items: center; gap: 12px;
+    background: #0b1017; color: var(--dim); font-size: 12px; z-index: 2;
+    transition: opacity .3s ease;
+  }
+  .loading.hide { opacity: 0; pointer-events: none; }
+  .spinner {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid rgba(45, 212, 191, .18); border-top-color: var(--accent-2);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 无 Electron 环境（直接浏览器打开 /app）时隐藏窗口按钮 */
+  body.no-electron .win-controls { display: none; }
+  body.no-electron .titlebar { padding-right: 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="titlebar">
+    <div class="brand">
+      <div class="logo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4" stroke-linecap="round">
+          <path d="M3 12h2M7 7v10M11 4v16M15 9v6M19 11v2"/>
+        </svg>
+      </div>
+      <div class="title">Qwen3-ASR<em>Desktop</em></div>
+      <div class="pill"><span class="dot" id="titleDot"></span>OLLAMA</div>
+    </div>
+    <div class="drag-fill"></div>
+    <div class="win-controls">
+      <button id="btnMin" title="最小化">
+        <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.1"/></svg>
+      </button>
+      <button id="btnMax" title="最大化 / 还原">
+        <svg width="11" height="11" viewBox="0 0 12 12"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
+      </button>
+      <button id="btnClose" class="close" title="关闭">
+        <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="nav-label">工作区 / WORKSPACE</div>
+      <nav class="nav" id="nav">
+        <button data-page="offline" class="active">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 15h1.5M13 13v4M16.5 14.5v1"/></svg>
+          <span>离线转写</span><span class="kbd">1</span>
+        </button>
+        <button data-page="stream">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg>
+          <span>实时转写</span><span class="kbd">2</span>
+        </button>
+        <button data-page="speakers">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>说话人</span><span class="kbd">3</span>
+        </button>
+        <button data-page="settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>设置</span><span class="kbd">4</span>
+        </button>
+      </nav>
+
+      <div class="spacer"></div>
+
+      <div class="status-card">
+        <div class="status-head">
+          <span class="dot" id="statusDot"></span>
+          <div>
+            <div class="status-title" id="statusTitle">正在连接…</div>
+            <div class="status-sub" id="statusSub">Ollama</div>
+          </div>
+        </div>
+        <div class="kv"><span>模型</span><b id="kvModel">—</b></div>
+        <div class="kv"><span>Ollama</span><b id="kvVersion">—</b></div>
+        <div class="kv"><span>本地端口</span><b id="kvPort">—</b></div>
+        <div class="status-actions">
+          <button id="btnRecheck">重新检测</button>
+          <button id="btnOpenSettings">去设置</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="stage-inner">
+        <div class="loading" id="loading">
+          <div class="spinner"></div>
+          <div>正在加载界面…</div>
+        </div>
+        <iframe id="frame" allow="microphone; autoplay; clipboard-write; display-capture"></iframe>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const frame = $('frame');
+  const loading = $('loading');
+
+  const PAGES = {
+    offline: '/web-ui?embed=1',
+    stream: '/web-ui/stream?embed=1',
+    speakers: '/web-ui/speakers?embed=1',
+    settings: '/web-ui/settings?embed=1'
+  };
+
+  const hasBridge = !!window.desktop && window.desktop.isElectron === true;
+  if (!hasBridge) document.body.classList.add('no-electron');
+
+  // 与 Electron 深色外壳保持一致：上游页面默认亮色，这里统一设为暗色 + 中文
+  try {
+    localStorage.setItem('asr_theme', 'dark');
+    if (!localStorage.getItem('asr_lang')) localStorage.setItem('asr_lang', 'zh');
+  } catch (error) { /* 忽略 */ }
+
+  // ---------- 窗口控制 ----------
+  if (hasBridge) {
+    $('btnMin').addEventListener('click', () => window.desktop.minimize());
+    $('btnMax').addEventListener('click', () => window.desktop.toggleMaximize());
+    $('btnClose').addEventListener('click', () => window.desktop.close());
+    if (window.desktop.onMaximizeChange) {
+      window.desktop.onMaximizeChange((maximized) => {
+        $('btnMax').title = maximized ? '还原' : '最大化';
+      });
+    }
+  }
+
+  // ---------- 内嵌页面 ----------
+  const POLISH = `
+    :root { --accent: #14b8a6; }
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .22); border-radius: 99px;
+      border: 2px solid transparent; background-clip: content-box;
+    }
+    *::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .38); background-clip: content-box; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    .n-button { border-radius: 10px !important; }
+    .n-card, .card, .panel { border-radius: 16px !important; }
+    .n-input, .n-base-selection { border-radius: 10px !important; }
+    .seg-row { border-radius: 10px; }
+  `;
+
+  function polish() {
+    try {
+      const doc = frame.contentDocument;
+      if (!doc || doc.getElementById('electron-polish')) return;
+      const style = doc.createElement('style');
+      style.id = 'electron-polish';
+      style.textContent = POLISH;
+      doc.head.appendChild(style);
+    } catch (e) { /* 跨域时忽略 */ }
+  }
+
+  function currentKey() {
+    return Object.keys(PAGES).find((key) => frame.dataset.page === key) || 'offline';
+  }
+
+  function navigate(page, keepLoading) {
+    if (!PAGES[page]) page = 'offline';
+    frame.dataset.page = page;
+    document.querySelectorAll('#nav button').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.page === page);
+    });
+    if (!keepLoading) {
+      loading.classList.remove('hide');
+      loading.innerHTML = '<div class="spinner"></div><div>正在加载界面…</div>';
+    }
+    frame.src = PAGES[page];
+  }
+
+  frame.addEventListener('load', () => {
+    // 页面内部可能跳到没有 embed 参数的地址，补上参数保持内嵌样式
+    try {
+      const loc = frame.contentWindow.location;
+      if (loc.pathname.indexOf('/web-ui') === 0 && loc.search.indexOf('embed=1') < 0) {
+        loc.replace(loc.pathname + '?embed=1');
+        return;
+      }
+    } catch (e) { /* ignore */ }
+    polish();
+    setTimeout(() => loading.classList.add('hide'), 120);
+  });
+
+  document.querySelectorAll('#nav button').forEach((btn) => {
+    btn.addEventListener('click', () => navigate(btn.dataset.page));
+  });
+
+  $('btnOpenSettings').addEventListener('click', () => navigate('settings'));
+
+  document.addEventListener('keydown', (event) => {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    const map = { '1': 'offline', '2': 'stream', '3': 'speakers', '4': 'settings' };
+    if (map[event.key]) {
+      event.preventDefault();
+      navigate(map[event.key]);
+    } else if (event.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      frame.contentWindow.location.reload();
+    }
+  });
+
+  // ---------- 服务状态 ----------
+  let lastHealth = null;
+
+  function setDot(kind) {
+    ['statusDot', 'titleDot'].forEach((id) => {
+      const el = $(id);
+      el.className = 'dot' + (kind ? ' ' + kind : '');
+    });
+  }
+
+  async function refreshHealth() {
+    try {
+      const res = await fetch('/v2/health', { cache: 'no-store' });
+      const data = await res.json();
+      lastHealth = data;
+      const ready = data.status === 'ready';
+      setDot(ready ? 'ok' : (data.status === 'loading' ? 'warn' : 'err'));
+      $('statusTitle').textContent = ready ? 'Ollama 已连接' : (data.status === 'loading' ? '模型加载中…' : '连接异常');
+      $('statusSub').textContent = ready
+        ? (data.model_available ? '模型可用' : '模型不可用')
+        : (data.message || '请检查 Ollama 是否已启动');
+      $('kvModel').textContent = data.model_size || '—';
+      $('kvModel').title = data.model_size || '';
+      $('kvVersion').textContent = data.ollama_version ? ('v' + data.ollama_version) : '—';
+      $('kvPort').textContent = location.port || '—';
+    } catch (err) {
+      setDot('err');
+      $('statusTitle').textContent = '本地服务异常';
+      $('statusSub').textContent = String(err && err.message || err);
+    }
+  }
+
+  $('btnRecheck').addEventListener('click', () => {
+    refreshHealth();
+    navigate(currentKey(), true);
+  });
+
+  navigate('offline', false);
+  refreshHealth();
+  setInterval(refreshHealth, 5000);
+})();
+</script>
+</body>
+</html>

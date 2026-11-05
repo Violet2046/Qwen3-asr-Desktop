@@ -1,0 +1,22 @@
+# 运行时产物
+data/
+settings.json
+*.log
+transcripts/
+
+# 构建产物
+build/
+dist/
+dist-electron/
+*.spec
+*.zip
+
+# Node / Electron
+electron/node_modules/
+node_modules/
+npm-debug.log*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
