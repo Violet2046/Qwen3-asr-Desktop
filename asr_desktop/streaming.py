@@ -44,7 +44,22 @@ class VadSegmenter:
         self._sample_pos = 0
         self._start_ms = 0.0
         self._silence_ms = 0.0
+        self._seq = 0
         self.in_speech = False
+
+    @property
+    def seq(self) -> int:
+        """当前语句序号；每完成/重置一段就自增，用于丢弃过期的增量结果。"""
+        return self._seq
+
+    def snapshot(self):
+        """返回当前正在累积的语音快照 (pcm, start_ms, end_ms, seq)，用于边说边出字。"""
+        if not self.in_speech or not self._utt:
+            return None
+        duration_ms = self._utt_ms()
+        if duration_ms <= 0:
+            return None
+        return bytes(self._utt), self._start_ms, self._start_ms + duration_ms, self._seq
 
     # ------------------------------------------------------------------
     def feed(self, data: bytes) -> List[Utterance]:
@@ -62,6 +77,7 @@ class VadSegmenter:
 
     def flush(self) -> List[Utterance]:
         out: List[Utterance] = []
+        self._seq += 1
         if self.in_speech and self._utt:
             item = self._finish(trim=True)
             if item is not None:
@@ -99,6 +115,7 @@ class VadSegmenter:
                     out.append(item)
 
     def _finish(self, trim: bool):
+        self._seq += 1
         pcm = bytes(self._utt)
         if trim:
             trim_ms = max(0.0, self._silence_ms - 200.0)

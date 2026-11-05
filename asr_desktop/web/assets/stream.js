@@ -35,7 +35,7 @@
       'scene.preset': '场景预设',
       'preset.balanced': '均衡（人声优先）', 'preset.live': '直播（人声优先+清唱偏置）',
       'preset.music': '音乐优先',
-      'cap.tip.partial_results': '需 vLLM 模式才支持（当前 vad-offline 后端按段输出，不产增量结果）',
+      'cap.tip.partial_results': '说话过程中持续返回临时文字（本机 Ollama 增量识别）',
       // 诊断指标
       'diag.sent': '发送速率', 'diag.recv': '接收速率', 'diag.buf': '发送缓冲',
       'diag.frame': '最大帧', 'diag.stall': '渲染延迟',
@@ -108,7 +108,7 @@
       'scene.preset': 'Scene preset',
       'preset.balanced': 'Balanced (vocal-priority)', 'preset.live': 'Live (vocal + a-cappella bias)',
       'preset.music': 'Music-first',
-      'cap.tip.partial_results': 'Requires vLLM mode (the current vad-offline backend emits per segment, not incrementally)',
+      'cap.tip.partial_results': 'Emits incremental text while you speak (Ollama partial decoding)',
       'diag.sent': 'Send rate', 'diag.recv': 'Recv rate', 'diag.buf': 'Send buffer',
       'diag.frame': 'Max frame', 'diag.stall': 'Render lag',
       'diag.unit.frame': 'fr/s', 'diag.unit.msg': 'msg/s', 'diag.unit.kb': 'KB',

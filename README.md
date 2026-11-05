@@ -34,7 +34,7 @@
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 离线文件转写 | ✅ | 支持 WAV/MP3/FLAC/M4A/AAC/OGG/WMA/AMR/OPUS，提交任务 + 轮询结果 |
-| 实时麦克风转写 | ✅ | 浏览器采音 → WebSocket → 能量 VAD 自动断句，逐句返回 |
+| 实时麦克风转写 | ✅ | 边说边出字：说话过程中持续推送增量结果（partial），停顿后自动定稿为整句（final） |
 | 文件模拟推流 | ✅ | 上游实时页自带的「用音频文件模拟推流」同样可用 |
 | 任务历史 / 取消 / 删除 | ✅ | 结果持久化到 `data/tasks.json`，重启后仍可查看 |
 | 时间轴 / 分段结果 / JSON | ✅ | 由 Ollama `verbose_json` 的分段直接映射 |
@@ -82,11 +82,11 @@ npm start
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build_electron.ps1
 # 产物：
-#   dist-electron\win-unpacked\                                  免安装目录
-#   dist-electron\Qwen3-ASR-Desktop-portable-win-x64-v1.0.0.zip  便携 zip（约 206 MB）
+#   dist-app\win-unpacked\                                  免安装目录
+#   dist-app\Qwen3-ASR-Desktop-portable-win-x64-v1.0.0.zip  便携 zip（约 206 MB）
 ```
 
-`dist-electron\win-unpacked` 整个目录即为便携包；同时会生成 zip，解压后双击
+`dist-app\win-unpacked` 整个目录即为便携包；同时会生成 zip，解压后双击
 `Start.bat` 或 `Qwen3-ASR Desktop.exe` 即可运行。其中已包含 Python 后端
 （`resources\backend`）、ffmpeg 与 Electron 运行时，目标机无需安装 Python / Node。
 仅用浏览器的精简打包：`build_portable.ps1`（产物 `dist\Qwen3-ASR-Desktop`，双击后以 Edge 应用窗口打开）。
@@ -103,9 +103,10 @@ powershell -ExecutionPolicy Bypass -File .\build_electron.ps1
 | 默认识别语言 | 自动检测 | 主界面未传语言时使用 |
 | 请求超时 | 300 秒 | 长音频可调大 |
 | 实时转写 | 开启 | 关闭后 `/v2/asr/stream` 返回 1011 |
-| 断句静音 | 900 ms | 越小出字越快，越大越不容易截断长句 |
+| 断句静音 | 700 ms | 越小定稿越快，越大越不容易截断长句 |
 | 最短语音 | 250 ms | 过滤咳嗽等短噪声 |
-| 最长分段 | 20 秒 | 防止单段超过模型窗口 |
+| 最长分段 | 12 秒 | 防止单段超过模型窗口 |
+| 增量结果间隔 | 700 ms | 说话过程中每隔该时长刷新一次临时文字，越小越实时、越耗算力 |
 | 语音门限 | -45 dBFS | 嘈杂环境建议 -40，安静环境 -50 |
 | ffmpeg 路径 | 自动查找 | 非 WAV 格式需要 后端入口：启动本地服务（可写 runtime.json 供 Electron 读取）
 ├─ asr_desktop/
@@ -158,7 +159,8 @@ powershell -ExecutionPolicy Bypass -File .\build_electron.ps1
 ## 6. 已知限制
 
 - Ollama 的转写模型单次窗口约 30–60 秒；离线接口由 Ollama 自动切分，超长音频会更慢。
-- 实时转写为「能量 VAD + 逐句识别」，不是流式增量解码；`partial` 结果为空。
+- 实时转写为「能量 VAD + 周期性增量识别」：说话过程中每 ~0.9s 会把当前累积音频送去识别并刷新临时文字，
+  停顿 700ms 后定稿；实际出字延迟取决于硬件——CPU 上 1.7b 每次约 2–4s，建议实时场景改用 0.6b 或启用 GPU。
 - 词级时间戳、说话人分离、声纹识别、音频事件标注依赖上游的 FunASR 模型，本便携版不包含。
 - Electron 外壳通过 iframe 内嵌上游页面（同源，支持麦克风）；若只想用浏览器，可运行 `build_portable.ps1` 产出的版本。
 - 首次启动 Electron 便携包时 Windows 可能弹出「防火墙/网络」提示，仅监听 `127.0.0.1`，拒绝即可。

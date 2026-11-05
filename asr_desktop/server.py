@@ -116,7 +116,7 @@ class AppContext:
                 "enabled": bool(settings.get("stream_enabled")),
                 "backend": "ollama-vad",
                 "path": "/v2/asr/stream",
-                "partial_results": False,
+                "partial_results": True,
                 "word_timestamps": False,
                 "speaker_labels": False,
                 "scene": False,
@@ -366,34 +366,49 @@ def create_app(ctx: AppContext) -> FastAPI:
                 await queue.put(("disconnect", None))
 
         pump_task = asyncio.create_task(pump())
-        streamer = VadSegmenter(
-            end_silence_ms=float(ctx.settings.get("stream_end_silence_ms") or 900),
-            min_speech_ms=float(ctx.settings.get("stream_min_speech_ms") or 250),
-            max_segment_sec=float(ctx.settings.get("stream_max_segment_sec") or 20),
-            threshold_dbfs=float(ctx.settings.get("vad_threshold_dbfs") or -45),
-        )
+        streamer = _make_streamer(ctx.settings, {})
         seg_id = 0
+        semaphore = asyncio.Semaphore(1)          # 同一时刻只跑一个推理，避免 Ollama 排队
+        final_tasks: set = set()
+        partial_task: Optional[asyncio.Task] = None
+        partial_interval = float(ctx.settings.get("stream_partial_interval_ms") or 900)
+        last_partial_ms = 0.0
+        last_partial = {"seq": -1, "text": "", "end_ms": 0.0}
+        closing = False
 
-        async def emit(utterance) -> None:
-            nonlocal seg_id
-            wav_bytes = audio.pcm_to_wav_bytes(utterance.pcm)
-            try:
-                result = await asyncio.to_thread(
+        async def transcribe(wav_bytes: bytes):
+            async with semaphore:
+                return await asyncio.to_thread(
                     ctx.client.transcribe_wav_bytes, wav_bytes, language
                 )
-            except OllamaError as exc:
-                logger.warning("实时分段识别失败：%s", exc)
-                await _safe_send(ws, {
-                    "type": "error", "code": "feed_failed", "message": str(exc),
-                    "seg_id": seg_id, "fatal": False,
-                })
-                return
-            text = (result.text or "").strip()
+
+        async def emit_final(utterance, cached_text: Optional[str] = None) -> None:
+            nonlocal seg_id
+            my_seg = seg_id
+            seg_id += 1
+            if cached_text:
+                # 增量结果已经覆盖到句尾：直接定稿，省掉一次完整推理（CPU 上快很多）
+                text = cached_text.strip()
+            else:
+                try:
+                    result = await transcribe(audio.pcm_to_wav_bytes(utterance.pcm))
+                except OllamaError as exc:
+                    message = str(exc)
+                    # 句尾残片（过短/几乎静音）识别为空属于正常情况，不当作错误上报
+                    if utterance.duration_ms < 800 and "没有返回识别文本" in message:
+                        return
+                    logger.warning("实时分段识别失败：%s", exc)
+                    await _safe_send(ws, {
+                        "type": "error", "code": "feed_failed", "message": message,
+                        "seg_id": my_seg, "fatal": False,
+                    })
+                    return
+                text = (result.text or "").strip()
             if not text:
                 return
             await _safe_send(ws, {
                 "type": "final",
-                "seg_id": seg_id,
+                "seg_id": my_seg,
                 "text": text,
                 "start": int(round(utterance.start_ms)),
                 "end": int(round(utterance.end_ms)),
@@ -402,7 +417,64 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "speaker_name": None,
                 "scene": None,
             })
-            seg_id += 1
+
+        def spawn_final(utterance, seq_hint: int) -> None:
+            nonlocal partial_task
+            # 该句已最终定稿，正在跑的增量结果已经过期，直接取消让推理让位给 final
+            if partial_task is not None and not partial_task.done():
+                partial_task.cancel()
+                partial_task = None
+            cached = None
+            if (last_partial["seq"] == seq_hint and last_partial["text"]
+                    and last_partial["end_ms"] >= utterance.end_ms - 500):
+                cached = last_partial["text"]
+            last_partial.update({"seq": -1, "text": "", "end_ms": 0.0})
+            task = asyncio.create_task(emit_final(utterance, cached))
+            final_tasks.add(task)
+            task.add_done_callback(final_tasks.discard)
+
+        async def emit_partial() -> None:
+            snapshot = streamer.snapshot()
+            if snapshot is None:
+                return
+            pcm, start_ms, end_ms, seq = snapshot
+            try:
+                result = await transcribe(audio.pcm_to_wav_bytes(pcm))
+            except OllamaError:
+                return
+            # 语句已经切分（或会话结束）时丢弃过期的增量结果
+            if closing or streamer.seq != seq:
+                return
+            text = (result.text or "").strip()
+            if not text:
+                return
+            last_partial.update({"seq": seq, "text": text, "end_ms": end_ms})
+            await _safe_send(ws, {
+                "type": "partial",
+                "seg_id": seg_id,
+                "text": text,
+                "start": int(round(start_ms)),
+                "end": int(round(end_ms)),
+            })
+
+        def maybe_partial() -> None:
+            """说话过程中周期性把当前累积音频送去识别，实现边说话边出字。"""
+            nonlocal last_partial_ms, partial_task
+            if closing or semaphore.locked():
+                return
+            if partial_task is not None and not partial_task.done():
+                return
+            snapshot = streamer.snapshot()
+            if snapshot is None:
+                return
+            _, start_ms, end_ms, _ = snapshot
+            length = end_ms - start_ms
+            if length < 350:
+                return
+            if length - last_partial_ms < partial_interval:
+                return
+            last_partial_ms = length
+            partial_task = asyncio.create_task(emit_partial())
 
         try:
             while True:
@@ -417,18 +489,16 @@ def create_app(ctx: AppContext) -> FastAPI:
                     msg_type = str(message.get("type") or "")
                     if msg_type == "start":
                         language = str(message.get("language") or language)
-                        streamer = VadSegmenter(
-                            end_silence_ms=float(message.get("max_end_silence_ms")
-                                                 or ctx.settings.get("stream_end_silence_ms") or 900),
-                            min_speech_ms=float(ctx.settings.get("stream_min_speech_ms") or 250),
-                            max_segment_sec=float(message.get("max_segment_sec")
-                                                  or ctx.settings.get("stream_max_segment_sec") or 20),
-                            threshold_dbfs=float(ctx.settings.get("vad_threshold_dbfs") or -45),
-                            audio_fs=int(message.get("audio_fs") or audio.TARGET_RATE),
-                        )
+                        streamer = _make_streamer(ctx.settings, message)
+                        last_partial_ms = 0.0
+                        last_partial.update({"seq": -1, "text": "", "end_ms": 0.0})
                     elif msg_type == "stop":
+                        closing = True
+                        seq_before = streamer.seq
                         for utterance in streamer.flush():
-                            await emit(utterance)
+                            spawn_final(utterance, seq_before)
+                        if final_tasks:
+                            await asyncio.gather(*final_tasks, return_exceptions=True)
                         await _safe_send(ws, {"type": "session.closed", "reason": "client_stop"})
                         break
                     elif msg_type == "enroll":
@@ -438,8 +508,11 @@ def create_app(ctx: AppContext) -> FastAPI:
                             "seg_id": None, "fatal": False,
                         })
                 elif kind == "audio":
+                    seq_before = streamer.seq
                     for utterance in streamer.feed(payload):
-                        await emit(utterance)
+                        last_partial_ms = 0.0
+                        spawn_final(utterance, seq_before)
+                    maybe_partial()
         except WebSocketDisconnect:
             pass
         except Exception as exc:  # noqa: BLE001
@@ -449,7 +522,12 @@ def create_app(ctx: AppContext) -> FastAPI:
                 "seg_id": None, "fatal": True,
             })
         finally:
+            closing = True
             pump_task.cancel()
+            if partial_task is not None and not partial_task.done():
+                partial_task.cancel()
+            for task in list(final_tasks):
+                task.cancel()
             try:
                 await ws.close()
             except Exception:
@@ -459,6 +537,19 @@ def create_app(ctx: AppContext) -> FastAPI:
 
 
 # --------------------------------------------------------------------------- 工具
+
+def _make_streamer(settings, message: Dict[str, Any]) -> VadSegmenter:
+    """按全局设置 + 会话 start 消息构建 VAD 分段器。"""
+    return VadSegmenter(
+        end_silence_ms=float(message.get("max_end_silence_ms")
+                             or settings.get("stream_end_silence_ms") or 700),
+        min_speech_ms=float(settings.get("stream_min_speech_ms") or 250),
+        max_segment_sec=float(message.get("max_segment_sec")
+                              or settings.get("stream_max_segment_sec") or 12),
+        threshold_dbfs=float(settings.get("vad_threshold_dbfs") or -45),
+        audio_fs=int(message.get("audio_fs") or audio.TARGET_RATE),
+    )
+
 
 def _session_created(ctx: AppContext, language: str) -> Dict[str, Any]:
     return {
@@ -470,7 +561,7 @@ def _session_created(ctx: AppContext, language: str) -> Dict[str, Any]:
         "sample_rate": audio.TARGET_RATE,
         "language": language or None,
         "capabilities": {
-            "partial_results": False,
+            "partial_results": True,
             "word_timestamps": False,
             "languages_auto": True,
             "speaker_labels": False,
@@ -506,7 +597,7 @@ def _coerce(key: str, value: Any) -> Any:
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="端口必须是整数") from exc
     if key in ("timeout", "stream_end_silence_ms", "stream_min_speech_ms",
-               "stream_max_segment_sec", "vad_threshold_dbfs"):
+               "stream_max_segment_sec", "stream_partial_interval_ms", "vad_threshold_dbfs"):
         try:
             return float(value)
         except (TypeError, ValueError) as exc:

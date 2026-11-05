@@ -158,6 +158,12 @@
     </div>
 
     <div class="field" style="max-width:260px;">
+      <label for="stream_partial_interval_ms">增量结果间隔（ms）</label>
+      <input class="inp" id="stream_partial_interval_ms" type="number" min="300" max="5000" step="100">
+      <span class="hint">说话过程中每隔该时长刷新一次临时文字：越小越实时，越小也越耗算力。</span>
+    </div>
+
+    <div class="field" style="max-width:260px;">
       <label for="vad_threshold_dbfs">语音门限（dBFS）</label>
       <input class="inp" id="vad_threshold_dbfs" type="number" min="-90" max="0" step="1">
       <span class="hint">环境嘈杂可调到 -40，安静环境可用 -50。</span>
@@ -225,7 +231,8 @@
       stream_enabled: $('stream_enabled').checked,
       stream_end_silence_ms: Number($('stream_end_silence_ms').value || 900),
       stream_min_speech_ms: Number($('stream_min_speech_ms').value || 250),
-      stream_max_segment_sec: Number($('stream_max_segment_sec').value || 20),
+      stream_max_segment_sec: Number($('stream_max_segment_sec').value || 12),
+      stream_partial_interval_ms: Number($('stream_partial_interval_ms').value || 700),
       vad_threshold_dbfs: Number($('vad_threshold_dbfs').value || -45),
       ffmpeg_path: $('ffmpeg_path').value.trim(),
       port: Number($('port').value || 8765)
@@ -256,6 +263,7 @@
       $('stream_end_silence_ms').value = s.stream_end_silence_ms;
       $('stream_min_speech_ms').value = s.stream_min_speech_ms;
       $('stream_max_segment_sec').value = s.stream_max_segment_sec;
+      $('stream_partial_interval_ms').value = s.stream_partial_interval_ms;
       $('vad_threshold_dbfs').value = s.vad_threshold_dbfs;
       $('ffmpeg_path').value = s.ffmpeg_path || '';
       $('port').value = s.port;

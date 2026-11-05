@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 import wave
 from pathlib import Path
@@ -32,26 +33,56 @@ def main() -> int:
     pcm = read_pcm16k(path)
     ws_url = base.replace("http://", "ws://").replace("https://", "wss://").rstrip("/") + "/v2/asr/stream"
     print("连接:", ws_url)
+    started = time.time()
+    audio_done_at = None
+    closed = threading.Event()
+    stats = {"partials": 0, "finals": 0, "first_partial": None}
 
     with connect(ws_url, max_size=None) as ws:
         first = json.loads(ws.recv())
-        print("session.created:", first.get("backend"), first.get("capabilities"))
-        ws.send(json.dumps({"type": "start", "audio_fs": 16000, "wav_name": "selftest"}))
+        print(f"[+{time.time() - started:5.1f}s] session.created:", first.get("backend"),
+              "partial_results=", (first.get("capabilities") or {}).get("partial_results"))
 
+        def receiver() -> None:
+            while not closed.is_set():
+                try:
+                    message = ws.recv()
+                except Exception:
+                    break
+                if isinstance(message, bytes):
+                    continue
+                data = json.loads(message)
+                kind = data.get("type")
+                now = time.time() - started
+                if kind == "partial":
+                    stats["partials"] += 1
+                    if stats["first_partial"] is None:
+                        stats["first_partial"] = now
+                    print(f"[+{now:5.1f}s] partial:", data.get("text"))
+                elif kind == "final":
+                    stats["finals"] += 1
+                    print(f"[+{now:5.1f}s] final({data.get('seg_id')}):", data.get("text"))
+                else:
+                    print(f"[+{now:5.1f}s] recv:", data)
+                if kind == "session.closed":
+                    closed.set()
+                    break
+
+        thread = threading.Thread(target=receiver, daemon=True)
+        thread.start()
+
+        ws.send(json.dumps({"type": "start", "audio_fs": 16000, "wav_name": "selftest"}))
         chunk = 1600 * 2  # 100ms
         for offset in range(0, len(pcm), chunk):
             ws.send(pcm[offset:offset + chunk])
             time.sleep(0.1)
+        audio_done_at = time.time() - started
+        print(f"[+{audio_done_at:5.1f}s] all audio pushed")
         ws.send(json.dumps({"type": "stop"}))
+        thread.join(timeout=180)
 
-        while True:
-            message = ws.recv()
-            if isinstance(message, bytes):
-                continue
-            data = json.loads(message)
-            print("recv:", data)
-            if data.get("type") == "session.closed":
-                break
+    print(f"统计: finals={stats['finals']}, partials={stats['partials']}, "
+          f"首个增量 @ +{stats['first_partial'] or 0:.1f}s（音频推完于 +{audio_done_at or 0:.1f}s）")
     return 0
 
 
