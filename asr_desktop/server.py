@@ -45,6 +45,7 @@ class AppContext:
         self.tasks = TaskManager(settings, on_activity=self.touch)
         self.started_at = time.time()
         self.running_port = 0
+        self.active_streams = 0            # 当前打开的实时转写会话数：会话期间不卸载模型
         self._health_cache: tuple[float, Optional[Dict[str, Any]]] = (0.0, None)
 
     def touch(self) -> None:
@@ -388,6 +389,8 @@ def create_app(ctx: AppContext) -> FastAPI:
             await ws.close(code=1011)
             return
         await ws.accept()
+        ctx.active_streams += 1
+        ctx.touch()
         language = str(ctx.settings.get("language") or "")
         await ws.send_json(_session_created(ctx, language))
 
@@ -566,6 +569,8 @@ def create_app(ctx: AppContext) -> FastAPI:
             })
         finally:
             closing = True
+            ctx.active_streams = max(0, ctx.active_streams - 1)
+            ctx.touch()
             pump_task.cancel()
             if partial_task is not None and not partial_task.done():
                 partial_task.cancel()
@@ -588,6 +593,10 @@ async def _idle_watchdog(ctx: AppContext) -> None:
         try:
             if not ctx.settings.get("idle_unload_enabled"):
                 ctx.last_activity = time.time()   # 未启用时保持“刚刚活跃”，避免启用后立刻卸载
+                continue
+            if ctx.active_streams > 0:
+                # 实时会话进行中（哪怕正在长停顿）不卸载：重新加载模型要多花好几秒
+                ctx.last_activity = time.time()
                 continue
             timeout = float(ctx.settings.get("idle_unload_sec") or 300)
             if time.time() - ctx.last_activity < timeout:

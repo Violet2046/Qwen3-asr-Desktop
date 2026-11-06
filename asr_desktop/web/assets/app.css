@@ -102,7 +102,7 @@ body.dark .svc-host .svc-badge { box-shadow: 0 0 0 1.5px rgba(16, 17, 21, .95); 
   .main-col { height: 100%; }
   .main-col .panel { height: 100%; display: flex; flex-direction: column; }
   .main-col .panel > .panel-body { flex: 1; min-height: 0; overflow: auto; }
-  #transcript { height: 100%; overflow: auto; }
+  #transcript { height: 100%; min-height: 0; overflow: auto; overscroll-behavior: contain; }
   .dock-card.open { flex: 0 0 33%; min-height: 0; display: flex; flex-direction: column; }
   .dock-card.open > .dock-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .dock-body { flex: 1; min-height: 0; overflow: auto; }

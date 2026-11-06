@@ -155,6 +155,11 @@
     box-shadow: 0 18px 48px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .035);
   }
   iframe { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+  /* 每个页面一个常驻 iframe：切换只做显示/隐藏，不重建 DOM，录音与 WebSocket 不会被打断。
+     用 visibility 而不是 display，保留布局与定时器，隐藏时不会被浏览器当成不可见页节流 */
+  .frames { position: absolute; inset: 0; }
+  .frames iframe { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: 0; }
+  .frames iframe.active { visibility: visible; pointer-events: auto; z-index: 1; }
   .loading {
     position: absolute; inset: 0; display: grid; place-items: center; gap: 12px;
     background: #0b1017; color: var(--dim); font-size: 12px; z-index: 2;
@@ -243,12 +248,12 @@
     </aside>
 
     <main class="stage">
-      <div class="stage-inner">
+      <div class="stage-inner" id="stage">
+        <div class="frames" id="frames"></div>
         <div class="loading" id="loading">
           <div class="spinner"></div>
           <div>正在加载界面…</div>
         </div>
-        <iframe id="frame" allow="microphone; autoplay; clipboard-write; display-capture"></iframe>
       </div>
     </main>
   </div>
@@ -257,8 +262,10 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const frame = $('frame');
   const loading = $('loading');
+  const framesBox = $('frames');
+  const frameCache = Object.create(null);
+  let currentPage = 'offline';
 
   const PAGES = {
     offline: '/web-ui?embed=1',
@@ -304,7 +311,7 @@
     .seg-row { border-radius: 10px; }
   `;
 
-  function polish() {
+  function polish(frame) {
     try {
       const doc = frame.contentDocument;
       if (!doc || doc.getElementById('electron-polish')) return;
@@ -313,10 +320,6 @@
       style.textContent = POLISH;
       doc.head.appendChild(style);
     } catch (e) { /* 跨域时忽略 */ }
-  }
-
-  function currentKey() {
-    return Object.keys(PAGES).find((key) => frame.dataset.page === key) || 'offline';
   }
 
   let loadTimer = null;
@@ -328,38 +331,74 @@
       '<br><span id="retryLoad" style="color:#2dd4bf;cursor:pointer;font-weight:600">点击重试</span></div>';
     loading.classList.remove('hide');
     const retry = $('retryLoad');
-    if (retry) retry.addEventListener('click', () => navigate(currentKey()));
+    if (retry) retry.addEventListener('click', () => navigate(currentPage, { force: true }));
   }
 
-  function navigate(page, keepLoading) {
-    if (!PAGES[page]) page = 'offline';
-    frame.dataset.page = page;
-    document.querySelectorAll('#nav button').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.page === page);
-    });
-    if (!keepLoading) {
-      loading.innerHTML = '<div class="spinner"></div><div>正在加载界面…</div>';
-      loading.classList.remove('hide');
-      clearTimeout(loadTimer);
-      // iframe 的 load 事件在异常情况下可能不触发，超时给出可点击的重试，避免一直转圈
-      loadTimer = setTimeout(() => showLoadError('页面加载超时'), 8000);
-    }
-    frame.src = PAGES[page];
+  function ensureFrame(page) {
+    if (frameCache[page]) return frameCache[page];
+    const el = document.createElement('iframe');
+    el.dataset.page = page;
+    el.setAttribute('allow', 'microphone; autoplay; clipboard-write; display-capture');
+    el.addEventListener('load', () => onFrameLoad(page));
+    framesBox.appendChild(el);
+    frameCache[page] = el;
+    el.src = PAGES[page];
+    return el;
   }
 
-  frame.addEventListener('load', () => {
-    clearTimeout(loadTimer);
+  function onFrameLoad(page) {
+    const el = frameCache[page];
+    if (!el) return;
     // 页面内部可能跳到没有 embed 参数的地址，补上参数保持内嵌样式
     try {
-      const loc = frame.contentWindow.location;
+      const loc = el.contentWindow.location;
       if (loc.pathname.indexOf('/web-ui') === 0 && loc.search.indexOf('embed=1') < 0) {
         loc.replace(loc.pathname + '?embed=1');
         return;
       }
     } catch (e) { /* ignore */ }
-    polish();
-    setTimeout(() => loading.classList.add('hide'), 120);
-  });
+    el.dataset.loaded = '1';
+    polish(el);
+    if (page === currentPage) {
+      clearTimeout(loadTimer);
+      setTimeout(() => loading.classList.add('hide'), 120);
+    }
+  }
+
+  function navigate(page, opts) {
+    if (!PAGES[page]) page = 'offline';
+    const force = !!(opts && opts.force);
+    const loaded = !!frameCache[page] && frameCache[page].dataset.loaded === '1';
+    const samePage = page === currentPage && loaded && !force;
+    currentPage = page;
+    document.querySelectorAll('#nav button').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.page === page);
+    });
+    if (samePage) {
+      clearTimeout(loadTimer);
+      loading.classList.add('hide');
+      return;
+    }
+    const el = ensureFrame(page);
+    // 只切换显示，保活其它页面（实时转写的 WebSocket 与麦克风不中断）
+    Object.keys(frameCache).forEach((key) => {
+      frameCache[key].classList.toggle('active', key === page);
+    });
+    if (force) {
+      delete el.dataset.loaded;
+      el.src = PAGES[page];
+    }
+    if (!loaded || force) {
+      loading.innerHTML = '<div class="spinner"></div><div>正在加载界面…</div>';
+      loading.classList.remove('hide');
+      clearTimeout(loadTimer);
+      // iframe 的 load 事件在异常情况下可能不触发，超时给出可点击的重试，避免一直转圈
+      loadTimer = setTimeout(() => showLoadError('页面加载超时'), 8000);
+    } else {
+      clearTimeout(loadTimer);
+      loading.classList.add('hide');
+    }
+  }
 
   document.querySelectorAll('#nav button').forEach((btn) => {
     btn.addEventListener('click', () => navigate(btn.dataset.page));
@@ -375,7 +414,7 @@
       navigate(map[event.key]);
     } else if (event.key.toLowerCase() === 'r') {
       event.preventDefault();
-      frame.contentWindow.location.reload();
+      navigate(currentPage, { force: true });
     }
   });
 
@@ -429,10 +468,10 @@
 
   $('btnRecheck').addEventListener('click', () => {
     refreshHealth();
-    navigate(currentKey(), true);
+    navigate(currentPage, { force: true });
   });
 
-  navigate('offline', false);
+  navigate('offline');
   refreshHealth();
   setInterval(refreshHealth, 8000);
 })();

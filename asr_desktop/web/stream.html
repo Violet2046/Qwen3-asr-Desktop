@@ -13,6 +13,27 @@
   body.embed.app-fullh .container { height: 100vh !important; padding-top: 18px !important; padding-bottom: 18px !important; }
   body.embed::before { display: none; }
   body.embed { background-image: none; }
+  /* 内嵌时不受 961px 断点影响：始终保持「左栏 + 右栏」满高布局，
+     转写区自己滚动，长录音只滚右栏，早期内容不会被挤到视口外或被裁掉 */
+  body.embed.app-fullh { overflow: hidden; }
+  body.embed .page-flex { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  body.embed .workspace { flex: 1; min-height: 0; flex-direction: row; align-items: stretch; }
+  body.embed .side-col { flex: 0 0 clamp(248px, 34%, 340px); width: auto; max-height: 100%; overflow: auto; }
+  body.embed .main-col { flex: 1; width: auto; height: 100%; min-width: 0; }
+  body.embed .main-col .panel { height: 100%; display: flex; flex-direction: column; }
+  body.embed .main-col .panel > .panel-body { flex: 1; min-height: 0; overflow: hidden; }
+  body.embed #transcript { height: 100%; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  /* 极窄窗口（< 720px）退回上下堆叠 + 文档流滚动，避免两栏挤压 */
+  @media (max-width: 719px) {
+    body.embed.app-fullh { overflow: auto; }
+    body.embed.app-fullh .container { height: auto !important; min-height: 100vh !important; }
+    body.embed .workspace { flex-direction: column; align-items: flex-start; }
+    body.embed .side-col { flex: none; width: 100%; max-height: none; overflow: visible; }
+    body.embed .main-col { height: auto; width: 100%; }
+    body.embed .main-col .panel { height: auto; display: block; }
+    body.embed .main-col .panel > .panel-body { overflow: visible; }
+    body.embed #transcript { height: auto; max-height: none; overflow: visible; }
+  }
 </style>
 <script>
   if (location.search.indexOf('embed=1') >= 0) {

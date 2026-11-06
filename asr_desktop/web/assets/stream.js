@@ -174,7 +174,8 @@
   const FRAME = 3200;                 // 200ms @16k
   const BP_LIMIT = 1 << 20;           // 1MB 发送缓冲上限（背压）
   const MAX_LOG_LINES = 300;
-  const MAX_TRANSCRIPT_LINES = 200;
+  // 转写结果不再丢历史：只做超大的安全阀（内存保护），长录音也能往回翻
+  const MAX_TRANSCRIPT_LINES = 20000;
   // ffmpeg-wasm 资源走 npmmirror（阿里云，国内可达且 CORS 开放，三包齐全）。
   // unpkg.zhimg 只镜像 @ffmpeg/core，缺 @ffmpeg/ffmpeg 与 @ffmpeg/util（请求 404 → 转码器静默失效），故整体改用 npmmirror。
   const ffFile = (pkg, ver, path) => 'https://registry.npmmirror.com/' + pkg + '/' + ver + '/files/' + path;
@@ -318,10 +319,19 @@
         if (id && navigator.clipboard) navigator.clipboard.writeText(id).then(() => { hint.value = ''; }).catch(() => {});
       }
 
-      // 满高布局下转写区内部滚动：新 final/partial 到达时跟随滚底
+      // 满高布局下转写区内部滚动：仅在用户贴底时自动跟随，向上翻阅历史不再被拽回底部
       const transcriptRef = ref(null);
+      const followTail = ref(true);
+      function onTranscriptScroll() {
+        const el = transcriptRef.value;
+        if (!el) return;
+        followTail.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      }
       watch([() => finals.length, partial], () => {
-        Vue.nextTick(() => { const el = transcriptRef.value; if (el) el.scrollTop = el.scrollHeight; });
+        Vue.nextTick(() => {
+          const el = transcriptRef.value;
+          if (el && followTail.value) el.scrollTop = el.scrollHeight;
+        });
       });
 
       // —— 协议日志 ——
@@ -772,6 +782,7 @@
         streamState, statusText, busy, source,
         capWarning, hint, capParts, capFlags, diag, vuRef,
         finals, partial, sceneLabel, sceneCls, sceneTags, scenePct, fmtMs, transcriptRef, spkIdx,
+        onTranscriptScroll,
         logs, logOpen, logRef,
         streamFile, streamFileList, streamFileSize, onStreamUploadChange,
         noThrottle, useFfmpeg, ffLoading, fileProgress, fileRunning,
@@ -945,7 +956,7 @@
           <div class="main-col">
             <n-card :bordered="false" class="panel" content-class="panel-body" size="small">
               <template #header><span class="panel-title"><a-icon name="doc" size="15"></a-icon>{{ t('panel.result') }}</span></template>
-              <div id="transcript" ref="transcriptRef">
+              <div id="transcript" ref="transcriptRef" @scroll="onTranscriptScroll">
                 <n-empty v-if="!finals.length && !partial" :description="t('result.waiting')" size="small" style="margin:24px 0;"></n-empty>
                 <template v-for="(line, i) in finals" :key="line.key">
                   <div v-if="i > 0 && line.batch !== finals[i - 1].batch" class="transcript-divider"><span>{{ t('result.divider') }}</span></div>
